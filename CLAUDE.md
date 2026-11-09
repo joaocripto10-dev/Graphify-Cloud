@@ -24,6 +24,8 @@ Graphify é o **mapa estrutural** de arquivos, conceitos, código, documentaçã
 - Após mudanças aprovadas no código, proponha/execute `graphify update .` conforme disponibilidade; nunca proclame atualização sem verificar a saída.
 - Se a skill Graphify não estiver instalada, explique como instalar; não invente seus resultados.
 
+**Política de versionamento do grafo:** `graphify-out/` fica integralmente fora do Git (ver `.gitignore`). Nunca versionar `graph.json`, `GRAPH_REPORT.md`, `graph.html`, `cache/`, `manifest.json`, `cost.json` nem outros arquivos derivados do grafo, pois resumem o conteúdo dos documentos. Um clone novo não traz grafo: reconstrua localmente com `/graphify .` no Claude Code antes de usar `graphify query/explain/path`. Mudanças só em código podem ser refletidas com `graphify update .`; mudanças em documentos exigem `/graphify . --update`. Se `graphify install` for executado de novo e reescrever a seção `## graphify` abaixo, reaplique esta política naquela seção.
+
 ## Rede de subagentes
 
 Os arquivos em `.claude/agents/` definem os especialistas. Você, **conversa principal**, mantém o planejamento e decide quando delegar. Agentes não executam continuamente nem possuem observação automática de bases reais.
@@ -85,3 +87,14 @@ Não associar ao projeto dados pessoais ou iniciativas de terceiros. Consulte `d
 ## Primeira mensagem após ativação
 
 Apresente apenas diagnóstico e plano de primeira execução, usando evidências reais do repositório aberto. Recomende `/diagnosticar-dados` para a inspeção e `/graphify .` para a criação inicial do grafo, se apropriado. Não crie infraestrutura como se já houvesse aprovação.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- When graphify-out/graph.json exists, run `graphify query "<question>"` before your first grep, search or source-file read for a codebase question, and put this rule in every subagent prompt that explores code. Read raw files only for lines the graph or an earlier read already located. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- graphify-out/ is NOT versioned in this repository (it is in .gitignore). Never commit graph.json, GRAPH_REPORT.md, graph.html, cache/ or any other graph-derived file. A fresh clone has no graph: rebuild it locally with `/graphify .` before relying on graph queries.

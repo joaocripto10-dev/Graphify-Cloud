@@ -67,6 +67,8 @@ O instalador não sobrescreve arquivos existentes; preserva `CLAUDE.md`, `.claud
 
 Antes de rodar a integração oficial, revise `git status`. A integração Graphify pode criar/editar arquivos de configuração e hooks. Confira o diff antes de fazer commit.
 
+**O grafo não é versionado.** `graphify-out/` (incluindo `graph.json`, `GRAPH_REPORT.md`, `graph.html` e `cache/`) fica fora do Git. Depois de clonar o repositório, instale o Graphify (passos 3 e 4) e reconstrua o grafo localmente com `/graphify .` no Claude Code. Os hooks em `.claude/settings.json` chamam `graphify` pelo PATH, então o executável precisa estar acessível (`uv tool update-shell` e reiniciar o VS Code).
+
 **Nunca use banco de produção ou dados pessoais reais para um teste inicial.** Inicie com amostras anônimas e dados sintéticos.
 
 ## Comandos úteis
