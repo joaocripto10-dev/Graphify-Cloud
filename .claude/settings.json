@@ -1,6 +1,64 @@
 {
+  "permissions": {
+    "deny": [
+      "Edit(./data/raw/**)",
+      "Edit(./.claude/settings.json)",
+      "Edit(./.claude/settings.local.json)",
+      "Edit(./.claude/agents/**)",
+      "Edit(./.claude/skills/**)",
+      "Edit(./.claude/hooks/**)",
+      "Edit(./CLAUDE.md)",
+      "Edit(./.claude/CLAUDE.md)",
+      "Edit(./.gitignore)",
+      "Edit(./.git/**)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)"
+    ],
+    "ask": [
+      "Bash(python:*)",
+      "Bash(py:*)",
+      "Bash(powershell:*)",
+      "Bash(pwsh:*)",
+      "Bash(sh -c:*)",
+      "Bash(bash -c:*)",
+      "Bash(rm:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(git checkout:*)",
+      "Bash(git restore:*)",
+      "PowerShell"
+    ],
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(graphify query:*)",
+      "Bash(graphify explain:*)",
+      "Bash(graphify path:*)",
+      "Bash(sha256sum:*)",
+      "Edit(./.claude/agent-memory-local/**)"
+    ],
+    "disableBypassPermissionsMode": "disable",
+    "blockWritesOutsideWorkingDirectories": true
+  },
   "hooks": {
     "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit|MultiEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -I \"$CLAUDE_PROJECT_DIR/.claude/hooks/guarda_agentes.py\"",
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      },
       {
         "matcher": "Bash|Grep",
         "hooks": [
