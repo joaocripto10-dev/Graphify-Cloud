@@ -1,4 +1,4 @@
-"""Hook PreToolUse de governanca do Graphify-Cloud (ETAPA 3E).
+"""Hook PreToolUse de governanca do Graphify-Cloud (ETAPAS 3E/3H).
 
 Restringe escritas por agente, conforme a matriz aprovada. Sem dependencias externas.
 Entrada: JSON do Claude Code via stdin (tool_name, tool_input, agent_type, cwd...).
@@ -6,7 +6,12 @@ Saida: exit 0 = segue para as regras de permissao normais; exit 2 = bloqueia (mo
 
 LIMITACAO: a analise de comandos Bash/PowerShell e heuristica (texto do comando). Scripts
 gravados em arquivo, caminhos montados dinamicamente ou ofuscacao NAO sao detectados.
+ESCRITA_PY e uma expressao regular, NAO um analisador de Python.
 Isto NAO e isolamento do sistema operacional.
+
+EXCECAO (ETAPA 3H): Write/Edit da sessao principal em um arquivo diretamente dentro de
+~/.claude/plans/ (nome [a-z0-9-]+.md, caminho resolvido com realpath) segue para as regras
+normais de permissao. Nao vale para subagentes, shell ou outras ferramentas.
 """
 import json
 import os
@@ -25,15 +30,21 @@ ESCOPO = {
     'especialista-bi': ('data/analytics/', 'outputs/'),
 }
 FERRAMENTAS_ARQUIVO = {'Edit', 'Write', 'NotebookEdit', 'MultiEdit'}
+FERRAMENTAS_PLANO = {'Write', 'Edit'}
 SHELL = {'Bash', 'PowerShell'}
+NOME_PLANO = re.compile(r'[a-z0-9-]+\.md')
 
 ESCRITA_SHELL = re.compile(
     r'(^|[\s;&|(])(tee|rm|rmdir|mv|cp|touch|mkdir|truncate|dd|install|ln|chmod|chown|unlink)(\s|$)'
     r'|sed\s+(-[a-z]*i|--in-place)'
     r'|(set-content|add-content|out-file|new-item|remove-item|move-item|copy-item|rename-item|clear-content|export-csv)\b',
     re.I)
+# Heuristica textual (nao e um analisador de Python). So uma string de MODO conta como
+# escrita: apos virgula ou mode= em open(...), ou como 1o argumento de .open(...).
+# Nomes de arquivo com as letras w/a/x nao disparam mais a regra (ETAPA 3H).
 ESCRITA_PY = re.compile(
-    r"open\([^)]*['\"][^'\"]*[wax+][^'\"]*['\"]"
+    r"open\([^)]*,\s*(mode\s*=\s*)?['\"][rwaxbt+]*[wax+][rwaxbt+]*['\"]"
+    r"|\.open\(\s*(mode\s*=\s*)?['\"][rwaxbt+]*[wax+][rwaxbt+]*['\"]"
     r"|\.write_(text|bytes)\(|\.to_(csv|excel|parquet|json|sql)\("
     r"|shutil\.(copy|copy2|copyfile|copytree|move|rmtree)|os\.(remove|unlink|rename|replace|makedirs|mkdir|rmdir)\("
     r"|\.(unlink|mkdir|touch|rename|replace|rmdir)\(",
@@ -60,6 +71,21 @@ def relativo(caminho, base):
 
 def protegido(rel):
     return any(rel == x.rstrip('/') or rel.startswith(x) for x in PROTEGIDOS) or rel.split('/')[-1].startswith('.env')
+
+
+def plano_permitido(evento, caminho):
+    """True so para plano da sessao principal diretamente em ~/.claude/plans/ (ETAPA 3H)."""
+    if evento.get('agent_type') or evento.get('agent_id'):
+        return False  # subagente
+    if evento.get('tool_name') not in FERRAMENTAS_PLANO or not caminho:
+        return False
+    try:
+        pasta = os.path.normcase(os.path.realpath(os.path.join(os.path.expanduser('~'), '.claude', 'plans')))
+        alvo = os.path.realpath(str(caminho))  # resolve '..', juncoes e links simbolicos
+    except Exception:
+        return False
+    return (os.path.normcase(os.path.dirname(alvo)) == pasta
+            and NOME_PLANO.fullmatch(os.path.basename(alvo)) is not None)
 
 
 def registrar(base, evento, decisao, motivo):
@@ -89,8 +115,12 @@ def decidir(evento):
     agente = evento.get('agent_type') or ''
 
     if ferramenta in FERRAMENTAS_ARQUIVO:
-        rel, dentro = relativo(entrada.get('file_path') or entrada.get('notebook_path'), base)
+        caminho = entrada.get('file_path') or entrada.get('notebook_path')
+        rel, dentro = relativo(caminho, base)
         if not dentro:
+            if plano_permitido(evento, caminho):
+                registrar(base, evento, 'permitido_plano', 'plano da sessao principal em ~/.claude/plans (segue para as regras de permissao)')
+                return
             negar(base, evento, f'escrita fora do projeto: {rel}')
         if protegido(rel):
             negar(base, evento, f'caminho protegido: {rel}')
