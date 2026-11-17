@@ -33,6 +33,15 @@ Fonte: `tests/fixtures/demo_4a/` (contrato em `docs/CONTRATOS_DADOS.md`, "Pipeli
 
 **Reconciliação:** Σ por unidade = Σ por produto = total da empresa, dentro de cada empresa.
 
+**Reconciliação linha a linha (FASE 4B):**
+- **Chaves e valores:** cada linha de faturamento, quantidade e estoque é conferida, por chave e valor, contra o recálculo a partir do staging. A taxa de inconsistência é conferida por entidade.
+
+**Ausência não é zero (B12, decidido na FASE 4B):**
+- **Sem linha:** empresa, unidade ou produto sem venda `VALIDO` no período não tem linha de faturamento nem de quantidade vendida.
+- **Leitura da ausência:** a ausência significa "sem venda válida registrada", e não "faturou R$ 0,00".
+- **Zero publicado:** uma linha de valor zero para esse recorte é indevida e reprova a reconciliação.
+- **Consumo:** painéis e consumidores não podem completar ausências com zero sem regra explícita aprovada.
+
 **Pendências para dados reais:** se `preco_unitario` inclui impostos; se haverá consolidação entre empresas.
 
 ## Avisos de consistência

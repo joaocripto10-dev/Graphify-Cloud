@@ -111,6 +111,17 @@ O estoque não tem filtro de período: cada foto vale para a própria `data_refe
 - **Faturamento entre camadas:** Σ em curated = Σ das linhas válidas em staging.
 - **Junção:** a contagem antes da junção é igual à de depois.
 - **Rastreabilidade:** linhas válidas não têm causa bloqueante; linhas em quarentena têm pelo menos uma.
+- **Indicadores publicados (4A, auditoria B1/B2):** o faturamento da empresa bate com Σ em curated, e as contagens batem com o status das linhas.
+- **Taxa de inconsistência (FASE 4B, R1):** a verificação `indicadores_taxa_<entidade>` exige exatamente uma linha publicada por entidade, igual a quarentena ÷ recebidos com 4 casas e ROUND_HALF_UP, recalculada só com inteiros, ou `indisponível` quando recebidos = 0. O `relatorio_qualidade.md` exibe a taxa publicada e reconciliada (fonte única).
+- **Chaves e valores dos indicadores (FASE 4B, R2):** as verificações `indicadores_chaves_<indicador>` cobrem `faturamento_bruto_valido`, `faturamento_por_unidade`, `faturamento_por_produto`, `quantidade_vendida` e `estoque_disponivel`.
+  - **Como compara:** a lista ordenada de linhas publicadas, com (empresa, unidade, codigo_produto, data_referencia, unidade_medida, unidade_valor, valor), é comparada com a lista recalculada a partir das linhas `VALIDO` do staging e do índice de produtos válidos, sem passar pela consolidação nem pelo cálculo dos indicadores.
+  - **O que detecta:** chave extra, ausente ou repetida, valor alterado (mesmo quando a soma geral se preserva), unidade de medida trocada e linha atribuída a outra empresa.
+  - **Catálogo:** a verificação `indicadores_catalogo` exige que cada linha publicada seja esperada e apareça exatamente uma vez, com a identidade completa:
+    - **Campos conferidos:** indicador, entidade, empresa, unidade, codigo_produto, data_referencia, unidade_medida, unidade_valor, lote, periodo_inicio e periodo_fim.
+    - **Contagens e taxa:** são linhas de entidade, com chaves de recorte vazias e `unidade_valor` igual a `registros` ou `proporção`.
+    - **Estoque:** não tem período.
+  - **Metadados:** a verificação `indicadores_metadados` exige uma única combinação de fórmula, grão, filtro e fonte por (indicador, entidade), sem campo vazio. Ela foi acrescentada depois da auditoria da 4B, achados D1 e D2.
+- **Ausência não é zero (B12, decidido na FASE 4B):** empresa, unidade ou produto sem venda `VALIDO` no período **não gera linha** de indicador de faturamento ou de quantidade. Uma linha `0.00` para esse recorte é indevida e reprova a reconciliação. Consumidores (BI) não podem completar ausências com zero sem regra explícita.
 
 ### Desvios em relação ao contrato da ETAPA 3E
 - **Devoluções:** quantidade negativa vai para `QUANTIDADE_INVALIDA`. Devoluções não são modeladas.
@@ -122,6 +133,11 @@ O estoque não tem filtro de período: cada foto vale para a própria `data_refe
 - **Rejeição do lote inteiro:** o lote é rejeitado com erro explícito quando há arquivo ausente, vazio ou fora de UTF-8, ou cabeçalho diferente do contrato. Nesse caso não se grava nenhuma saída parcial.
 - **Preservação:** a entrada é só lida, nunca gravada. O pipeline recusa entrada dentro de `data/` e saída fora de `data/staging`, `data/curated`, `data/analytics` e `outputs`.
 - **Idempotência:** a mesma entrada gera arquivos de dados idênticos byte a byte. Só `execucao.json` contém horário.
+- **Bytes das fontes e identidade do lote (FASE 4B, ADR-002):** o lote é derivado dos bytes brutos das fontes, de modo que CRLF e LF geram lotes diferentes.
+  - **Regra no Git:** as fixtures em `tests/fixtures/` ficam com `-text` no `.gitattributes`, e o Git não converte quebras de linha em nenhuma máquina.
+  - **Testes:** a integridade é testada contra os blobs do commit aprovado `1f70e76`, sem hashes digitados.
+  - **Lote de referência:** o lote esperado das fixtures é `DEMO4A-cc6f21e0d609`.
+- **Testes de fuso (FASE 4B, R4):** o modo `zoneinfo` é testado com o arquivo TZif de `tests/fixtures/tzif/`, cuja proveniência está em `PROVENIENCIA.md`, injetado por `PYTHONTZPATH` absoluto. O fallback é forçado com uma pasta vazia. Nada disso muda o motor, que continua com o fallback quando não há base de fusos.
 
 ### Interface (estável; os testes dependem dela)
 - **API:** `consolidacao.pipeline.executar(entrada, inicio, fim, raiz) -> dict`.

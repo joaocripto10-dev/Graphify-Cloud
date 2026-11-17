@@ -59,6 +59,67 @@
   - **R4:** o caminho com `zoneinfo` e horário de verão não foi testado; o ambiente não tem `tzdata`, e o teste fica ignorado.
   - **R5:** as fixtures e o gabarito não estavam versionados. Fica resolvido com o commit desta versão.
 
+**Atualização FASE 4B (16/11/2026):** implementação autorizada pelo usuário, ainda **sem commit**.
+- **B12 decidido:** recorte sem venda `VALIDO` não gera linha, e ausência não é zero. Está documentado no contrato e no dicionário, e a reconciliação acusa linha indevida, inclusive de valor zero.
+- **R1 tratado:**
+  - **Nova verificação:** `indicadores_taxa_<entidade>`, por aritmética inteira e independente do cálculo em Decimal.
+  - **Relatório:** usa a taxa publicada e reconciliada.
+- **R2 tratado:**
+  - **Novas verificações:** `indicadores_chaves_<indicador>` (5 indicadores) e `indicadores_catalogo`, com esperados recalculados a partir do staging.
+  - **Correções da auditoria (achados D1 e D2):**
+    - **O que passava:** a primeira auditoria publicou linhas de contagem e de taxa com empresa preenchida, além de lote, período, fórmula e fonte adulterados.
+    - **Catálogo:** `indicadores_catalogo` passou a conferir a identidade completa de cada linha (chaves, unidade do valor, lote e período).
+    - **Metadados:** entrou `indicadores_metadados`, para fórmula, grão, filtro e fonte por (indicador, entidade).
+  - **Total:** a reconciliação passou de 21 para 32 verificações.
+- **R3 tratado:** com testes de falha provocada por mock, na API e na linha de comando, que devolve o código 3. Não é publicado nada, o lote anterior fica intacto e não sobram resíduos. O código de publicação não foi alterado.
+- **R4 tratado:** com o arquivo TZif da base IANA 2026c, de domínio público (`tests/fixtures/tzif/PROVENIENCIA.md`), e `PYTHONTZPATH` absoluto em subprocesso. São testados o horário de verão de 2000 a 2018, os limites de novembro de 2018 e fevereiro de 2019, e o fallback forçado.
+- **Pendentes mantidos:** M1, B8, comparação na deduplicação, separador do lote e atomicidade da publicação.
+- **Parecer do `auditor-independente`:** na primeira rodada, PENDENTE (achados D1, D2, D3 e D7). Na reauditoria do delta, **APROVADO com ressalva** para o escopo técnico.
+- **Riscos residuais da 4B (severidade Baixa):**
+  - **Metadados:** `indicadores_metadados` confere unicidade, e não conteúdo. Uma fórmula, fonte, filtro ou grão alterado de forma uniforme é publicado. Valores, chaves, lote e período não são afetados.
+  - **Independência parcial do recálculo (D5):** usa o mesmo staging e as mesmas funções decimais. Isso é mitigado pelos testes contra o gabarito.
+  - **Pulos condicionais (D6):** os testes de quebra de linha pulam sem o Git ou sem o commit `1f70e76`, por exemplo num clone raso. O fallback forçado pula se o pacote `tzdata` estiver instalado.
+  - **P17 real:** continua PENDENTE (WinError 1314). O teste simulado não o substitui.
+
+---
+
+## ADR-002 — Bytes das fixtures independentes de `core.autocrlf` (16/11/2026)
+
+**Situação:**
+- **Origem do risco:** o Git for Windows vem com `core.autocrlf=true` na configuração do sistema. Num clone novo, as fixtures saíam com CRLF: os 5 hashes mudavam e o lote passava a `DEMO4A-1ccefdf75a4a` em vez de `DEMO4A-cc6f21e0d609`.
+- **Por que passava despercebido:** a suíte não percebia, porque recalcula os esperados a partir da própria árvore de trabalho.
+- **Os blobs estavam íntegros:** só a extração os convertia.
+
+**Alternativas:**
+- `* text=auto` global: muda todos os arquivos de texto do repositório e não foi testada.
+- Exigir `core.autocrlf=false` de cada pessoa: não persiste num novo checkout.
+- Atualizar os hashes esperados: esconderia a mudança.
+- Regra restrita às fixtures.
+
+**Decisão:** criar o `.gitattributes` com a regra única `tests/fixtures/** -text`. O índice já estava em LF, e os IDs de blob do índice, da árvore e de `1f70e76` são iguais. Por isso não houve renormalização nem regravação de fixtures.
+
+**Responsável:** orquestrador, com aprovação do usuário (FASE 4B).
+
+**Impactos:** só a extração dos arquivos sob `tests/fixtures/` muda; os demais arquivos seguem a configuração de cada máquina.
+
+**Evidências:** `tests/test_consolidacao_eol.py`. Ele testa:
+- os blobs de `1f70e76` contra a árvore;
+- a ausência de CR nas fixtures;
+- o atributo `-text` só nas fixtures;
+- o lote `DEMO4A-cc6f21e0d609`;
+- um clone temporário com `core.autocrlf=true`, com controle de que a conversão está ativa, um novo checkout e as 14 saídas idênticas;
+- o detector de CRLF.
+
+Na prova de mutação, sem a regra os testes do clone e do atributo falham (14 falhas).
+
+**Migração de clones existentes:** um clone feito antes desta regra pode ter fixtures em CRLF.
+1. Depois de atualizar o repositório, rode `git ls-files --eol tests/fixtures`. O esperado é `i/lf w/lf attr/-text`.
+2. Se aparecer `w/crlf`, apague as fixtures da árvore e restaure-as do Git: `git checkout -- tests/fixtures`.
+3. **Nunca** rode `git add -A` nem `git add --renormalize` num clone com fixtures em CRLF, porque isso gravaria blobs CRLF.
+4. Confirme com `python -I -m unittest discover -s tests -p "test_consolidacao_eol.py"`.
+
+**Reversão:** remover o `.gitattributes` e o teste. As fixtures não precisam ser alteradas.
+
 ---
 
 ## Modelo de nova decisão

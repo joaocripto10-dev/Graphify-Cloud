@@ -114,6 +114,139 @@ def _soma_indicador(inds, indicador, empresa):
                  if r["indicador"] == indicador and r["empresa"] == empresa)
 
 
+# Fase 4B (R1, R2): esperados recalculados por caminho independente de indicadores.calcular
+# e de consolida (staging VALIDO + índice de produtos válidos; taxa só com inteiros).
+_INDICADORES_CONTAGEM = ("registros_recebidos", "registros_validos", "registros_quarentena",
+                         "registros_fora_periodo", "duplicatas_descartadas")
+_CAMPOS_INDICADOR = ("empresa", "unidade", "codigo_produto", "data_referencia",
+                     "unidade_medida", "unidade_valor", "valor")
+
+
+def _taxa_por_inteiros(quarentena, recebidos):
+    """quarentena ÷ recebidos, 4 casas, ROUND_HALF_UP; 'indisponível' se recebidos = 0."""
+    if recebidos == 0:
+        return C.TAXA_INDISPONIVEL
+    inteiro, fracao = divmod((2 * quarentena * 10000 + recebidos) // (2 * recebidos), 10000)
+    return f"{inteiro}.{fracao:04d}"
+
+
+def _esperados_por_indicador(avaliadas, indice):
+    """{indicador: [linha esperada]} dos indicadores de valor, nos campos _CAMPOS_INDICADOR.
+
+    B12: empresa ou recorte sem venda VALIDO não tem linha (ausência não é zero).
+    """
+    def medida(empresa, codigo):
+        produto = indice.get((empresa, codigo))
+        return produto.valores["unidade_medida"] if produto is not None else ""
+
+    def dinheiro(valores):
+        return formatar_decimal(arredondar_centavos(somar(valores)))
+
+    fat, uni, prod, qtd = {}, {}, {}, {}
+    for la in avaliadas[C.VENDAS.nome]:
+        if la.status != C.VALIDO:
+            continue
+        v = la.valores
+        emp, codigo = v["empresa"], v["codigo_produto"]
+        valor = parse_decimal(v["valor_calculado"])[0]
+        fat.setdefault(emp, []).append(valor)
+        uni.setdefault((emp, v["unidade"]), []).append(valor)
+        prod.setdefault((emp, codigo), []).append(valor)
+        qtd.setdefault((emp, codigo, medida(emp, codigo)), []).append(
+            parse_decimal(v["quantidade"])[0])
+    estoque = []
+    for la in avaliadas[C.ESTOQUE.nome]:
+        if la.status != C.VALIDO:
+            continue
+        v = la.valores
+        um = medida(v["empresa"], v["codigo_produto"])
+        estoque.append((v["empresa"], v["unidade"], v["codigo_produto"], v["data_referencia"],
+                        um, um, formatar_decimal(parse_decimal(v["quantidade_disponivel"])[0])))
+    return {
+        "faturamento_bruto_valido": [(e, "", "", "", "", "R$", dinheiro(vs))
+                                     for e, vs in fat.items()],
+        "faturamento_por_unidade": [(e, u, "", "", "", "R$", dinheiro(vs))
+                                    for (e, u), vs in uni.items()],
+        "faturamento_por_produto": [(e, "", c, "", "", "R$", dinheiro(vs))
+                                    for (e, c), vs in prod.items()],
+        "quantidade_vendida": [(e, "", c, "", um, um, formatar_decimal(somar(vs)))
+                               for (e, c, um), vs in qtd.items()],
+        "estoque_disponivel": estoque,
+    }
+
+
+_ENTIDADE_INDICADOR = {"faturamento_bruto_valido": C.VENDAS.nome,
+                       "faturamento_por_unidade": C.VENDAS.nome,
+                       "faturamento_por_produto": C.VENDAS.nome,
+                       "quantidade_vendida": C.VENDAS.nome,
+                       "estoque_disponivel": C.ESTOQUE.nome}
+
+
+# Identidade de cada linha de indicador (auditoria 4B, D1/D2): chaves, unidade do valor,
+# lote e período. Linhas de entidade (contagens e taxa) têm chaves de recorte vazias.
+_IDENTIDADE = ("indicador", "entidade", "empresa", "unidade", "codigo_produto",
+               "data_referencia", "unidade_medida", "unidade_valor", "lote",
+               "periodo_inicio", "periodo_fim")
+_METADADOS = ("formula", "grao", "filtro", "fonte")
+
+
+def _verificacoes_indicadores(avaliadas, indice, inds, lote, inicio, fim):
+    """R1 (taxa por entidade), R2 (chaves e valores por indicador) e catálogo completo."""
+    v = []
+    for e in C.ENTIDADES:
+        quarentena = sum(1 for la in avaliadas[e.nome] if la.status == C.QUARENTENA)
+        publicadas = [r["valor"] for r in inds
+                      if r["indicador"] == "taxa_inconsistencia" and r["entidade"] == e.nome]
+        v.append(_verificacao(
+            f"indicadores_taxa_{e.nome}",
+            "taxa_inconsistencia publicada uma única vez = quarentena ÷ recebidos "
+            "(4 casas, ROUND_HALF_UP; 'indisponível' se recebidos = 0)",
+            [_taxa_por_inteiros(quarentena, len(avaliadas[e.nome]))], publicadas))
+    esperados = _esperados_por_indicador(avaliadas, indice)
+    for nome, linhas in sorted(esperados.items()):
+        obtidas = [tuple(r[c] for c in _CAMPOS_INDICADOR) for r in inds
+                   if r["indicador"] == nome]
+        v.append(_verificacao(
+            f"indicadores_chaves_{nome}",
+            f"linhas de {nome} (chaves {', '.join(_CAMPOS_INDICADOR[:-1])} e valor) = "
+            "recálculo pelo staging VALIDO; sem chave extra, ausente ou repetida",
+            [list(x) for x in sorted(linhas)], [list(x) for x in sorted(obtidas)]))
+    periodo = (inicio.isoformat(), fim.isoformat())
+    catalogo = [(n, e.nome, "", "", "", "", "", "registros", lote) + periodo
+                for e in C.ENTIDADES for n in _INDICADORES_CONTAGEM]
+    catalogo += [("taxa_inconsistencia", e.nome, "", "", "", "", "", "proporção", lote) + periodo
+                 for e in C.ENTIDADES]
+    for n, linhas in esperados.items():
+        # A posição de estoque é foto (data de referência), sem período de vendas.
+        per = ("", "") if n == "estoque_disponivel" else periodo
+        catalogo += [(n, _ENTIDADE_INDICADOR[n]) + tuple(x[:-1]) + (lote,) + per
+                     for x in linhas]
+    v.append(_verificacao(
+        "indicadores_catalogo",
+        "cada linha publicada é esperada e aparece exatamente uma vez, com identidade completa "
+        "(" + ", ".join(_IDENTIDADE) + ")",
+        [list(x) for x in sorted(catalogo)],
+        [list(x) for x in sorted(tuple(r[c] for c in _IDENTIDADE) for r in inds)]))
+    combinacoes = {}
+    for r in inds:  # a fonte das contagens e da taxa é o arquivo da própria entidade
+        combinacoes.setdefault(f'{r["indicador"]}/{r["entidade"]}', set()).add(
+            tuple(r[c] for c in _METADADOS))
+    v.append(_verificacao(
+        "indicadores_metadados",
+        "cada (indicador, entidade) publicado tem uma única combinação de fórmula, grão, "
+        "filtro e fonte, sem campo vazio",
+        {n: 1 for n in sorted(combinacoes)},
+        {n: len(c) + (100 if any("" in x for x in c) else 0)
+         for n, c in sorted(combinacoes.items())}))
+    return v
+
+
+def taxa_publicada(inds, entidade):
+    """Taxa de inconsistência publicada (já reconciliada) de uma entidade."""
+    return next(r["valor"] for r in inds
+                if r["indicador"] == "taxa_inconsistencia" and r["entidade"] == entidade)
+
+
 def _reler_sha(arquivos):
     obtidos = {}
     for a in arquivos:
@@ -125,7 +258,7 @@ def _reler_sha(arquivos):
 
 
 def _reconciliar(arquivos, avaliadas, contagens, juncao_vendas, juncao_estoque,
-                 indice, inds):
+                 indice, inds, lote, inicio, fim):
     v = []
     for e in C.ENTIDADES:
         cont = contagens[e.nome]
@@ -208,6 +341,7 @@ def _reconciliar(arquivos, avaliadas, contagens, juncao_vendas, juncao_estoque,
     v.append(_verificacao("entrada_inalterada",
                           "sha256 das fontes relido no fim do pipeline é igual ao inicial",
                           {a.arquivo: a.sha256 for a in lidos}, _reler_sha(lidos)))
+    v.extend(_verificacoes_indicadores(avaliadas, indice, inds, lote, inicio, fim))
     v.sort(key=lambda x: x["id"])
     return {"ok": all(x["ok"] for x in v), "verificacoes": v}
 
@@ -250,7 +384,7 @@ def executar(entrada, inicio, fim, raiz):
     contagens = {nome: indicadores.contar_status(linhas) for nome, linhas in avaliadas.items()}
 
     reconciliacao = _reconciliar(arquivos, avaliadas, contagens, juncao_vendas,
-                                 juncao_estoque, indice, inds)
+                                 juncao_estoque, indice, inds, lote, inicio, fim)
     if not reconciliacao["ok"]:
         falhas = [x["id"] for x in reconciliacao["verificacoes"] if not x["ok"]]
         LOG.error("lote %s: reconciliação falhou (%s)", lote, ", ".join(falhas))
@@ -295,9 +429,8 @@ def _conteudos(lote, fuso, inicio, fim, arquivos, avaliadas, contagens, juncao_v
     }
     analytics = {"indicadores.csv": saida.csv_texto(C.COLUNAS_INDICADORES, inds)}
 
-    taxas = {e.nome: indicadores.taxa_inconsistencia(
-        contagens[e.nome][C.QUARENTENA], contagens[e.nome]["recebidos"])
-        for e in C.ENTIDADES}
+    # Fase 4B (R1): fonte única, a taxa publicada em indicadores.csv e já reconciliada.
+    taxas = {e.nome: taxa_publicada(inds, e.nome) for e in C.ENTIDADES}
     motivos = []
     for e in C.ENTIDADES:
         cont = {}

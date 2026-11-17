@@ -1,0 +1,3 @@
+# FASE 4B (ADR-002): as fixtures sao bytes imutaveis. O Git nao converte quebras de linha
+# nelas, qualquer que seja o core.autocrlf da maquina. Regra restrita; sem politica global.
+tests/fixtures/** -text
