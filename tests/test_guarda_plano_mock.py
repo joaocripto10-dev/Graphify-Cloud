@@ -35,8 +35,14 @@ def _ler_fonte():
 
 
 def _sha_hook():
+    """SHA-256 do hook com quebras de linha normalizadas para LF (como o blob no Git).
+
+    O hook nao esta sob a regra -text do .gitattributes; num clone com core.autocrlf=true
+    ele sai com CRLF. O conteudo aprovado e o mesmo; so a quebra de linha muda.
+    """
     with open(HOOK, 'rb') as f:
-        return hashlib.sha256(f.read()).hexdigest()
+        dados = f.read()
+    return hashlib.sha256(b'\n'.join(dados.split(b'\r\n'))).hexdigest()
 
 
 def carregar_hook(fonte, nome='guarda_agentes_simulado'):
