@@ -198,7 +198,8 @@ def executar_api(entrada, raiz, inicio=INICIO, fim=FIM):
 
 
 def executar_cli(entrada, raiz, periodo=PERIODO_CLI, cwd=None):
-    comando = [sys.executable, '-I', SCRIPT_CLI, '--entrada', str(entrada),
+    # -B: nenhum bytecode gravado em src/ durante os testes (FASE 4B.1, ADR-003).
+    comando = [sys.executable, '-I', '-B', SCRIPT_CLI, '--entrada', str(entrada),
                '--periodo', periodo, '--raiz', str(raiz)]
     return subprocess.run(comando, capture_output=True, text=True, encoding='utf-8',
                           errors='replace', timeout=300, cwd=cwd or tempfile.gettempdir())
